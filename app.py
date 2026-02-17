@@ -7,78 +7,166 @@ import plotly.graph_objects as go
 from datetime import timedelta
 import os
 
+# =====================================================
+# PAGE CONFIG
+# =====================================================
 st.set_page_config(page_title="VayuSutra AQI Intelligence", layout="wide")
 
-# ----------------------------
+# =====================================================
+# CUSTOM ENVIRONMENTAL THEME
+# =====================================================
+st.markdown("""
+<style>
+
+/* Sky + Land Gradient Background */
+.stApp {
+    background: linear-gradient(to bottom, #87CEEB 0%, #f0f8ff 40%, #d4f4dd 100%);
+}
+
+/* Main content container */
+.block-container {
+    background-color: rgba(255, 255, 255, 0.92);
+    padding: 2rem;
+    border-radius: 20px;
+}
+
+/* Sidebar styling */
+[data-testid="stSidebar"] {
+    background: linear-gradient(to bottom, #e0f7fa, #c8e6c9);
+}
+
+/* Header styling */
+h1, h2, h3 {
+    color: #1b5e20;
+}
+
+/* Metric styling */
+[data-testid="metric-container"] {
+    background-color: rgba(255,255,255,0.95);
+    padding: 15px;
+    border-radius: 15px;
+    box-shadow: 0px 4px 15px rgba(0,0,0,0.1);
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================
 # LOAD DATA
-# ----------------------------
+# =====================================================
 df = pd.read_csv("data/processed_aqi.csv")
 df['Date'] = pd.to_datetime(df['Date'])
 
-# ----------------------------
-# SIDEBAR
-# ----------------------------
-st.sidebar.title("⚙️ Control Panel")
+# =====================================================
+# SIDEBAR CONTROLS
+# =====================================================
+st.sidebar.title("🌬️ VayuSutra Control Panel")
 
 cities = df['City'].unique()
-city = st.sidebar.selectbox("Select City", cities)
+city = st.sidebar.selectbox("📍 Select City", cities)
 
-mode = st.sidebar.radio(
-    "Prediction Mode",
-    ["Historical Forecast", "Manual Input Simulation"]
+min_date = df['Date'].min()
+max_date = df['Date'].max()
+
+start_date = st.sidebar.date_input(
+    "📅 Start Date",
+    value=max_date - pd.Timedelta(days=90),
+    min_value=min_date,
+    max_value=max_date
 )
 
-# ----------------------------
-# CITY DATA (DEFINE ONCE)
-# ----------------------------
+end_date = st.sidebar.date_input(
+    "📅 End Date",
+    value=max_date,
+    min_value=min_date,
+    max_value=max_date
+)
+
+if start_date > end_date:
+    st.sidebar.error("Start date must be before end date.")
+    st.stop()
+
+page = st.sidebar.radio(
+    "📂 Navigate",
+    ["📊 Analytics", "🔮 Forecast", "🎛 Simulation Lab", "🧠 AI Insights", "🌍 City Comparison"]
+)
+
+# =====================================================
+# DATA PREPARATION
+# =====================================================
 full_city_df = df[df['City'] == city].sort_values("Date")
 
 if len(full_city_df) < 7:
-    st.error("Not enough data.")
+    st.error("Not enough data for forecasting.")
     st.stop()
 
-# Used for graphs (last 60 days)
-city_df = full_city_df.tail(60)
+filtered_city_df = full_city_df[
+    (full_city_df['Date'] >= pd.to_datetime(start_date)) &
+    (full_city_df['Date'] <= pd.to_datetime(end_date))
+]
 
 latest_row = full_city_df.iloc[-1]
 last_7 = full_city_df.tail(7)
 next_date = latest_row['Date'] + timedelta(days=1)
 
-# ----------------------------
+# =====================================================
 # LOAD MODEL
-# ----------------------------
+# =====================================================
 model_path = f"models/city_models/xgb_{city}.pkl"
 
 if not os.path.exists(model_path):
-    st.error("Model not found.")
+    st.error("Model not found. Train models first.")
     st.stop()
 
 model = joblib.load(model_path)
 
-# ----------------------------
+# =====================================================
 # HEADER
-# ----------------------------
+# =====================================================
 st.title("🌬️ VayuSutra - AQI Intelligence System")
-st.markdown(f"### 📍 City: {city}")
+st.markdown(f"### 📍 Selected City: {city}")
 
 # =====================================================
-# HISTORICAL FORECAST MODE
+# ANALYTICS PAGE
 # =====================================================
-if mode == "Historical Forecast":
+if page == "📊 Analytics":
 
-    st.subheader("📊 Historical AQI (Last 60 Days)")
+    st.subheader("Historical AQI Trend")
 
-    fig1 = px.line(
-        city_df,
-        x="Date",
-        y="AQI",
-        markers=True
-    )
+    if filtered_city_df.empty:
+        st.warning("No data for selected range.")
+    else:
+        fig = px.line(
+            filtered_city_df,
+            x="Date",
+            y="AQI",
+            markers=True
+        )
+        fig.update_layout(hovermode="x unified", height=450)
+        st.plotly_chart(fig, use_container_width=True)
 
-    fig1.update_layout(height=350, hovermode="x unified")
-    st.plotly_chart(fig1, use_container_width=True)
+        st.markdown("---")
 
-    # Forecast calculation
+        pollutant = st.selectbox(
+            "Explore Pollutant Trend",
+            ["PM2.5", "PM10", "NO2", "SO2", "CO"]
+        )
+
+        fig2 = px.line(
+            filtered_city_df,
+            x="Date",
+            y=pollutant
+        )
+        fig2.update_layout(hovermode="x unified", height=450)
+        st.plotly_chart(fig2, use_container_width=True)
+
+# =====================================================
+# FORECAST PAGE
+# =====================================================
+elif page == "🔮 Forecast":
+
+    st.subheader("7-Day AQI Forecast")
+
     forecast_values = []
     forecast_dates = []
     temp_df = full_city_df.copy()
@@ -114,33 +202,31 @@ if mode == "Historical Forecast":
         new_row['AQI'] = pred
         temp_df = pd.concat([temp_df, pd.DataFrame([new_row])])
 
-    st.subheader("📈 7-Day Forecast")
-
-    fig2 = go.Figure()
-
-    fig2.add_trace(go.Scatter(
-        x=city_df["Date"],
-        y=city_df["AQI"],
-        mode="lines+markers",
-        name="Actual"
-    ))
-
-    fig2.add_trace(go.Scatter(
+    fig3 = go.Figure()
+    fig3.add_trace(go.Scatter(
         x=forecast_dates,
         y=forecast_values,
         mode="lines+markers",
-        name="Forecast"
+        name="Forecast AQI"
     ))
+    fig3.update_layout(hovermode="x unified", height=450)
+    st.plotly_chart(fig3, use_container_width=True)
 
-    fig2.update_layout(height=350, hovermode="x unified")
-    st.plotly_chart(fig2, use_container_width=True)
+    st.download_button(
+        "📥 Download Forecast CSV",
+        data=pd.DataFrame({
+            "Date": forecast_dates,
+            "Forecast_AQI": forecast_values
+        }).to_csv(index=False),
+        file_name="forecast.csv"
+    )
 
 # =====================================================
-# MANUAL SIMULATION MODE
+# SIMULATION LAB
 # =====================================================
-else:
+elif page == "🎛 Simulation Lab":
 
-    st.subheader("🎛️ Manual AQI Simulation")
+    st.subheader("AQI Simulation Lab")
 
     col1, col2 = st.columns(2)
 
@@ -171,4 +257,61 @@ else:
 
     prediction = model.predict(pd.DataFrame([input_data]))[0]
 
-    st.metric("Predicted AQI", round(prediction, 2))
+    fig4 = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=prediction,
+        title={'text': "Predicted AQI"},
+        gauge={
+            'axis': {'range': [0, 500]},
+            'steps': [
+                {'range': [0, 50], 'color': "green"},
+                {'range': [50, 100], 'color': "yellow"},
+                {'range': [100, 200], 'color': "orange"},
+                {'range': [200, 500], 'color': "red"}
+            ]
+        }
+    ))
+
+    st.plotly_chart(fig4, use_container_width=True)
+
+# =====================================================
+# CITY COMPARISON
+# =====================================================
+elif page == "🌍 City Comparison":
+
+    st.subheader("Compare Cities")
+
+    selected_cities = st.multiselect(
+        "Select Cities",
+        df['City'].unique(),
+        default=[city]
+    )
+
+    filtered_df = df[
+        (df['City'].isin(selected_cities)) &
+        (df['Date'] >= pd.to_datetime(start_date)) &
+        (df['Date'] <= pd.to_datetime(end_date))
+    ]
+
+    if filtered_df.empty:
+        st.warning("No data for selected range.")
+    else:
+        fig = px.line(
+            filtered_df,
+            x="Date",
+            y="AQI",
+            color="City",
+            markers=True
+        )
+        fig.update_layout(hovermode="x unified", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+        summary = (
+            filtered_df.groupby("City")["AQI"]
+            .agg(["mean", "max", "min"])
+            .reset_index()
+        )
+
+        summary.columns = ["City", "Average AQI", "Max AQI", "Min AQI"]
+
+        st.dataframe(summary)
