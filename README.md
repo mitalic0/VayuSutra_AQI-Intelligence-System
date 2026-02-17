@@ -1,10 +1,6 @@
 
 # VayuSutra - Multi-City Enhanced AQI Forecasting System
 
-## Dataset Required
-Place Kaggle 'city_day.csv' in:
-data/city_day.csv
-
 ## Execution Flow
 1. python preprocess.py
 2. python split_by_year.py
